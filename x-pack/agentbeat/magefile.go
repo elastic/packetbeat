@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/magefile/mage/sh"
@@ -74,6 +75,10 @@ func BuildSystemTestBinary() error {
 // GolangCrossBuild build the Beat binary inside of the golang-builder.
 // Do not use directly, use crossBuild instead.
 func GolangCrossBuild() error {
+	if err := xpacketbeat.CopyNPCAPInstaller("../packetbeat/npcap/installer/"); err != nil {
+		return err
+	}
+
 	// need packetbeat build arguments as it address the requirements for libpcap
 	args := packetbeat.GolangCrossBuildArgs()
 	args.ExtraFlags = append(args.ExtraFlags, "-tags=agentbeat")
@@ -134,6 +139,9 @@ func Package() error {
 
 	// Add osquery distro binaries, required for the osquerybeat subcommand.
 	osquerybeat.CustomizePackaging()
+
+	// customize packetbeat package to reflect os
+	packetbeat.CustomizePackaging()
 
 	// Add metricbeat lightweight modules.
 	if err := metricbeat.CustomizeLightModulesPackaging(); err != nil {
@@ -215,4 +223,15 @@ func GoIntegTest(ctx context.Context) error {
 func PythonIntegTest(ctx context.Context) error {
 	mg.Deps(BuildSystemTestBinary)
 	return devtools.PythonIntegTestFromHost(devtools.DefaultPythonTestIntegrationFromHostArgs())
+}
+
+func SystemTest(ctx context.Context) error {
+	os.Setenv("DEV_OS", runtime.GOOS)
+	mg.SerialDeps(xpacketbeat.GetNpcapInstaller, Update, devtools.BuildSystemTestBinary)
+
+	args := devtools.DefaultGoTestIntegrationArgs()
+	args.Packages = []string{"../packetbeat/tests/system/..."}
+	args.Tags = append(args.Tags, "agentbeat")
+
+	return devtools.GoTest(ctx, args)
 }
