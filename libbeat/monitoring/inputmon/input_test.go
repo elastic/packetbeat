@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/elastic-agent-libs/monitoring"
 )
 
@@ -91,7 +92,10 @@ func TestMetricSnapshotJSON(t *testing.T) {
 	defer cancel()
 	monitoring.NewInt(r, "foo_total").Set(100)
 
-	jsonBytes, err := MetricSnapshotJSON()
+	bInfo := beat.Info{}
+	bInfo.Monitoring.Namespace = monitoring.GetNamespace("TestMetricSnapshotJSON")
+
+	jsonBytes, err := MetricSnapshotJSON(bInfo)
 	require.NoError(t, err)
 
 	const expected = `[

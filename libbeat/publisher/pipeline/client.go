@@ -79,7 +79,7 @@ func (c *client) publish(e beat.Event) {
 		publish = true
 	)
 
-	c.onNewEvent()
+	c.onNewEvent(e)
 
 	if !c.isOpen.Load() {
 		// client is closing down -> report event as dropped and return
@@ -123,7 +123,7 @@ func (c *client) publish(e beat.Event) {
 	}
 
 	if published {
-		c.onPublished()
+		c.onPublished(e)
 	} else {
 		c.onDroppedOnPublish(e)
 	}
@@ -171,23 +171,23 @@ func (c *client) onClosed() {
 	}
 }
 
-func (c *client) onNewEvent() {
-	c.observer.newEvent()
+func (c *client) onNewEvent(e beat.Event) {
+	c.observer.newEvent(e)
 }
 
-func (c *client) onPublished() {
-	c.observer.publishedEvent()
+func (c *client) onPublished(e beat.Event) {
+	c.observer.publishedEvent(e)
 	if c.clientListener != nil {
 		c.clientListener.Published()
 	}
 }
 
 func (c *client) onFilteredOut(e beat.Event) {
-	c.observer.filteredEvent()
+	c.observer.filteredEvent(e)
 }
 
 func (c *client) onDroppedOnPublish(e beat.Event) {
-	c.observer.failedPublishEvent()
+	c.observer.failedPublishEvent(e)
 	if c.clientListener != nil {
 		c.clientListener.DroppedOnPublish(e)
 	}
