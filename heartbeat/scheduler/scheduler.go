@@ -28,6 +28,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/elastic/beats/v7/heartbeat/config"
+	"github.com/elastic/beats/v7/heartbeat/monitors/maintwin"
 	"github.com/elastic/beats/v7/heartbeat/scheduler/timerqueue"
 	"github.com/elastic/elastic-agent-libs/logp"
 	"github.com/elastic/elastic-agent-libs/monitoring"
@@ -161,11 +162,11 @@ func (s *Scheduler) WaitForRunOnce() {
 // has already stopped.
 var ErrAlreadyStopped = errors.New("attempted to add job to already stopped scheduler")
 
-type AddTask func(sched Schedule, id string, entrypoint TaskFunc, jobType string) (removeFn context.CancelFunc, err error)
+type AddTask func(sched Schedule, pmw maintwin.ParsedMaintWin, id string, entrypoint TaskFunc, jobType string) (removeFn context.CancelFunc, err error)
 
 // Add adds the given TaskFunc to the current scheduler. Will return an error if the scheduler
 // is done.
-func (s *Scheduler) Add(sched Schedule, id string, entrypoint TaskFunc, jobType string) (removeFn context.CancelFunc, err error) {
+func (s *Scheduler) Add(sched Schedule, pmw maintwin.ParsedMaintWin, id string, entrypoint TaskFunc, jobType string) (removeFn context.CancelFunc, err error) {
 	if errors.Is(s.ctx.Err(), context.Canceled) {
 		return nil, ErrAlreadyStopped
 	}
@@ -178,7 +179,7 @@ func (s *Scheduler) Add(sched Schedule, id string, entrypoint TaskFunc, jobType 
 
 	var taskFn timerqueue.TimerTaskFn
 
-	taskFn = func(_ time.Time) {
+	taskFn = func(now time.Time) {
 		select {
 		case <-jobCtx.Done():
 			debugf("Job '%v' canceled", id)
@@ -189,7 +190,18 @@ func (s *Scheduler) Add(sched Schedule, id string, entrypoint TaskFunc, jobType 
 		debugf("Job '%s' started", id)
 		sj := newSchedJob(jobCtx, s, id, jobType, entrypoint)
 
-		lastRanAt := sj.run()
+		inMaintWin := false
+		if pmw.IsActive(now) {
+			inMaintWin = true
+		}
+
+		var lastRanAt time.Time
+		if !inMaintWin {
+			lastRanAt = sj.run()
+		} else {
+			logp.L().Infof("Job '%s' is in maintenance window, skipping", id)
+			lastRanAt = now
+		}
 		s.stats.activeJobs.Dec()
 
 		if s.runOnce {
@@ -199,6 +211,13 @@ func (s *Scheduler) Add(sched Schedule, id string, entrypoint TaskFunc, jobType 
 			s.runTaskOnce(sched.Next(lastRanAt), taskFn, true)
 		}
 		debugf("Job '%v' returned at %v", id, time.Now())
+	}
+
+	if s.runOnce && pmw.IsActive(time.Now()) {
+		return func() {
+			debugf("Remove scheduler job '%v'", id)
+			jobCtxCancel()
+		}, nil
 	}
 
 	if s.runOnce {
